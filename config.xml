@@ -24,6 +24,11 @@
 	<!--Make game launch each instance in the same screen location so you don't have to move your game windows around when starting the game.-->
 	<RememberWindowLocations>False</RememberWindowLocations>
 
+	<!--Enable Layout Mode. Layout mode allows you to save and load specific window configurations. Save will save all of your currently open games,
+	along with a chosen setting file and game region, to a specific layout. Load will then allow you to load these layouts. Choosing a layout
+	will launch of the saved games with the right position, settings and under the right region -->
+	<LayoutModeEnabled>False</LayoutModeEnabled>
+
 	<!--If specified, this enables the window switching feature where you can use a keyboard combination + a number to switch to a window.
 	Specify which combo keys (exclude numbers) that should be used for switching windows.
 	Valid (comma separated) options are: Alt, Ctrl and Shift.

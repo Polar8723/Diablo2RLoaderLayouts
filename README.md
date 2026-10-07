@@ -125,6 +125,20 @@ Jokes courtesy of v2.jokeapi.dev, official-joke-api.appspot.com, icanhazdadjoke.
 If configured, the script can launch each game instance to the preferred screen location and window size so that you don't have to rearrange your game windows at launch.<br>
 ![image](https://github.com/user-attachments/assets/a416e4d2-c337-49d3-868e-0828b23dd66e)
 
+**Saved window layouts**<br>
+A more advanced feature combining the functionality of the *Manual Settings Switcher* with **Remember Windows Layout**.
+
+This allows you to save specific window layouts. This is helpful when you want to launch multiple windows very faster under specific settings that differ from the standard `batch` launch.
+
+To enable this option set `<LayoutModeEnabled>True</LayoutModeEnabled>` inside the config.xml
+
+This will allow you to save the configuration of all of your currently opened game windows into a specific layout. When saving
+
+- The position of the windows will automatically be remembered.
+- You will also be prompted which settings file and which region the window will need to launch in when the layout is next loaded.
+
+When loading a saved layout after, all the windows will be loaded in the correct position with the assigned settings and region.
+
 **Launch Parameters**<br>
 You can run the script using launch parameters instead.<br>
 This is ideal if you want to create a desktop shortcut to open a set of accounts, or if you're a super nerd and you want to launch the accounts from a scheduled task or from Home Assistant so that your game is ready to go when you get home from work :)<br>
@@ -136,6 +150,7 @@ Available launch parameters and values to use are as per the table below:<br>
 | -region                | na.actual.battle.net <br> 1/2/3<br>NA/EU/AS/KR | Used to specify the connection region | Specify either the full server name, use the realm initials (NA/EU/AS/KR) or use 1, 2 or 3 as values to select NA, EU or KR |
 | -all                   | True                                        | Opens all accounts                    | Recommend using -region with this parameter. |
 | -batch                 | 1                                           | Opens a batch of accounts at once     | Recommend using -region with this parameter |
+| -layout                | 1                                           | Opens all windows in a saved layout automatically | Use the Layout ID shown after saving or in the layout list (also stored in layouts.csv). Requires LayoutModeEnabled=True |
 | -manualsettingswitcher | True                                        | Use this if you want to manually choose which settings file to load with each account. | Recommend not using this but instead enabling SettingSwitcherEnabled in your config file so that it automatically loads from settings<_ID_>.json |
 | -close                 | 2 <br> all                                  | For closing one or more instances of D2r. | Use ID of account as the value to close or use value "all" to close all instances |
 
@@ -233,6 +248,7 @@ All other config options below this are optional:<br>
 - Set 'TerrorZoneOverlay' to True to enable the TZ overlay.
 - Set 'DisableMoo' to True if you don't want to be surprised with silly moo audio notifications.
 - Set 'ForceAuthTokenForRegion' to enforce AuthToken based authentication for one or more regions. Useful if an Auth server goes down preventing parameter based connections (remember when Asia stopped working for several weeks?) Valid options are NA, EU and KR. Multiple values should be comma separated. Recommend leaving blank unless there are auth issues.
+- Set 'LayoutModeEnabled' to True if you want to save and load specific window layouts. See [Saved window layouts](#saved-window-layouts) for more information. Disabled by default.
 
 Done editing? Make sure to save the file! CTRL + S for the win :)
 

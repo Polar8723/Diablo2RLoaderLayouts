@@ -7,7 +7,7 @@ Happy for you to make any modifications to this script for your own needs provid
 - Any variants of this script are never modifed to enable or assist in any game altering or malicious behaviour including (but not limited to): Bannable Mods, Cheats, Exploits, Phishing
 Purpose:
 	Script will allow opening multiple Diablo 2 resurrected instances and will automatically close the 'DiabloII Check For Other Instances' handle."
-	Script will import account details from CSV. Alternatively you can run script parameters (see Github readme): -AccountUsername, -PW, -Region, -All, -Batch, -ManualSettingSwitcher
+	Script will import account details from CSV. Alternatively you can run script parameters (see Github readme): -AccountUsername, -PW, -Region, -All, -Batch, -Layout, -ManualSettingSwitcher
 Instructions: See GitHub readme https://github.com/shupershuff/Diablo2RLoader
 
 Notes:
@@ -34,12 +34,17 @@ In line with the above, perhaps investigate putting TZ details on main menu and 
 To reduce lines, Tidy up all the import/export csv bits for stat updates into a function rather than copy paste the same commands throughout the script. Can't really be bothered though :)
 #>
 
-param($AccountUsername,$PW,$Region,$All,$Batch,$ManualSettingSwitcher,$Close) #used to capture parameters sent to the script, if anyone even wants to do that.
+param($AccountUsername,$PW,$Region,$All,$Batch,$ManualSettingSwitcher,$Close,
+	[ValidateNotNullOrEmpty()][ValidatePattern('^[1-9][0-9]*$')]$Layout) #used to capture parameters sent to the script, if anyone even wants to do that.
 $CurrentVersion = "1.18.1"
 ###########################################################################################################################################
 # Script itself
 ###########################################################################################################################################
 $host.ui.RawUI.WindowTitle = "Diablo 2 Resurrected Loader"
+if ($Null -ne $Layout -and ($Null -ne $AccountUsername -or $Null -ne $PW -or $Null -ne $Region -or $Null -ne $All -or $Null -ne $Batch -or $Null -ne $ManualSettingSwitcher -or $Null -ne $Close)){
+	Write-Host 'Use -layout by itself. The saved layout supplies its accounts, settings and regions.' -ForegroundColor Red
+	exit 1
+}
 if (($Null -ne $PW -or $Null -ne $AccountUsername) -and ($Null -ne $Batch -or $Null -ne $All)){#If someone sends through incompatible parameters, prioritise $All and $Batch (in that order).
 	$PW = $Null
 	$AccountUsername = $Null
@@ -70,6 +75,9 @@ if ($Null -ne $ManualSettingSwitcher){
 }
 if ($Null -ne $Close){
 	$ScriptArguments += " -close $Close"
+}
+if ($Null -ne $Layout){
+	$ScriptArguments += " -layout $Layout"
 }
 #check if parameters were used
 if ($Null -ne $ScriptArguments){
@@ -114,7 +122,7 @@ $Script:NotificationHasBeenChecked = $False
 $Script:AllowedKeyList = @(48,49,50,51,52,53,54,55,56,57) #0 to 9
 $Script:AllowedKeyList += @(96,97,98,99,100,101,102,103,104,105) #0 to 9 on numpad
 $Script:AllowedKeyList += @(65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90) # A to Z
-$Script:MenuOptions = @(65,66,67,68,71,73,74,79,82,83,84,88) #a, b, c, d, g, i, j, o, r, s, t and x. Used to detect singular valid entries where script can have two characters entered.
+$Script:MenuOptions = @(65,66,67,68,71,73,74,76,79,82,83,84,88) #a, b, c, d, g, i, j, l, o, r, s, t and x. Used to detect singular valid entries where script can have two characters entered.
 $EnterKey = 13
 try {
 	$Script:SettingsProfilePath = ((Get-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders" -name "{4C5C32FF-BB9D-43B0-B5B4-2D72E54EAAA4}" -ErrorAction Stop)."{4C5C32FF-BB9D-43B0-B5B4-2D72E54EAAA4}" + "\Diablo II Resurrected\") #Get Saved Games folder from registry rather than assume it's in C:\Users\Username\Saved Games
@@ -1086,6 +1094,7 @@ Function ValidationAndSetup {
 	$BooleanConfigs =
 	"ConvertPlainTextSecrets",
 	"ManualSettingSwitcherEnabled",
+	"LayoutModeEnabled",
 	"RememberWindowLocations",
 	"DisableOpenAllAccountsOption",
 	"CreateDesktopShortcut",
@@ -1099,7 +1108,7 @@ Function ValidationAndSetup {
 	$AvailableConfigs = $AvailableConfigs + $BooleanConfigs
 	$ConfigXMLlist = ($Config | Get-Member | Where-Object {$_.membertype -eq "Property" -and $_.name -notlike "#comment"}).name
 	ForEach ($Option in $AvailableConfigs){#Config validation
-		if ($Option -notin $ConfigXMLlist -and $Option -ne "UseChinaRegion"){
+		if ($Option -notin $ConfigXMLlist -and $Option -notin "UseChinaRegion","LayoutModeEnabled"){
 			Write-Host " Config.xml file is missing a config option for $Option." -foregroundcolor yellow
 			Start-Sleep 1
 			PressTheAnyKey
@@ -1887,6 +1896,246 @@ Function LoadWindowClass { #Used to get window locations, place them in the same
 		}
 "@	}
 }
+Function GetLayoutSettingsPath {
+	param($Account)
+	$ProfilePath = $Script:SettingsProfilePath
+	if ($Account.CustomLaunchArguments -match '-mod\s+(\S+)'){
+		$ModName = $matches[1]
+		foreach ($InfoPath in @("$($Script:Config.GamePath)\Mods\$ModName\$ModName.mpq\Modinfo.json", "$($Script:Config.GamePath)\Mods\$ModName\Modinfo.json")){
+			if (Test-Path -LiteralPath $InfoPath -PathType Leaf){
+				$SavePath = (Get-Content -LiteralPath $InfoPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop).savepath
+				if ($SavePath -and $SavePath -ne '../'){
+					$ProfilePath = Join-Path $ProfilePath ("mods\" + $SavePath.Trim('/'))
+				}
+				break
+			}
+		}
+	}
+	return $ProfilePath
+}
+Function GetLayoutSettingsFiles {
+	param($Account)
+	$ProfilePath = GetLayoutSettingsPath -Account $Account
+	Get-ChildItem -LiteralPath $ProfilePath -File -ErrorAction Stop |
+		Where-Object {$_.Name -match '^Settings(?:\d+|\..+)?\.json$'} |
+		Sort-Object @{Expression={if ($_.Name -ieq 'Settings.json'){0}elseif ($_.Name -match '^Settings\d+\.json$'){1}else{2}}},
+			@{Expression={if ($_.Name -match '^Settings(\d+)\.json$'){[int]$matches[1]}else{0}}}, Name
+}
+Function ReadLayoutWindowBounds {
+	param([int]$ProcessId)
+	LoadWindowClass
+	$GameProcess = Get-Process -Id $ProcessId -ErrorAction Stop
+	$Rectangle = New-Object RECT
+	if ($GameProcess.MainWindowHandle -eq 0 -or -not [Window]::GetWindowRect($GameProcess.MainWindowHandle, [ref]$Rectangle)){
+		throw "Cannot read the position of game window $ProcessId."
+	}
+	if ($Rectangle.Right -le $Rectangle.Left -or $Rectangle.Bottom -le $Rectangle.Top){throw 'Game window has no usable size.'}
+	[pscustomobject]@{WindowXCoordinates=$Rectangle.Left; WindowYCoordinates=$Rectangle.Top;
+		WindowHeight=($Rectangle.Bottom - $Rectangle.Top); WindowWidth=($Rectangle.Right - $Rectangle.Left)}
+}
+Function GetNextLayoutId {
+	param([object[]]$Rows)
+	$MaximumId = 0
+	foreach ($Row in $Rows){
+		$Id = 0
+		if ($Row.LayoutId -notmatch '^[1-9][0-9]*$' -or -not [int]::TryParse([string]$Row.LayoutId, [ref]$Id)){
+			throw "Invalid numeric layout ID '$($Row.LayoutId)'."
+		}
+		if ($Id -gt $MaximumId){$MaximumId = $Id}
+	}
+	if ($MaximumId -eq [int]::MaxValue){throw 'No more numeric layout IDs are available.'}
+	return ($MaximumId + 1)
+}
+Function WriteLayouts {
+	param([object[]]$Rows)
+	$LayoutPath = Join-Path $Script:WorkingDirectory 'layouts.csv'
+	$TempPath = "$LayoutPath.$([guid]::NewGuid().ToString()).tmp"
+	try {
+		$Rows | Export-Csv -LiteralPath $TempPath -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
+		Move-Item -LiteralPath $TempPath -Destination $LayoutPath -Force -ErrorAction Stop
+	} finally {if (Test-Path -LiteralPath $TempPath){Remove-Item -LiteralPath $TempPath -ErrorAction SilentlyContinue}}
+}
+Function ReadLayouts {
+	$LayoutPath = Join-Path $Script:WorkingDirectory 'layouts.csv'
+	if (-not (Test-Path -LiteralPath $LayoutPath)){return}
+	$Rows = @(Import-Csv -LiteralPath $LayoutPath -ErrorAction Stop)
+	$Columns = 'LayoutId','LayoutName','WindowIndex','AccountId','WindowXCoordinates','WindowYCoordinates','WindowHeight','WindowWidth','SettingFile','LaunchRegion'
+	foreach ($Row in $Rows){
+		foreach ($Column in $Columns){
+			if ($Column -notin $Row.PSObject.Properties.Name){throw "layouts.csv is missing column '$Column'."}
+		}
+		if ([string]::IsNullOrWhiteSpace($Row.LayoutId) -or [string]::IsNullOrWhiteSpace($Row.LayoutName)){throw 'layouts.csv contains an empty layout ID or name.'}
+		$Id = 0
+		if ($Row.LayoutId -notmatch '^[1-9][0-9]*$' -or -not [int]::TryParse([string]$Row.LayoutId, [ref]$Id)){
+			throw "Invalid layout ID '$($Row.LayoutId)'. Expected a positive number."
+		}
+	}
+	return $Rows
+}
+Function SaveLayout {
+	try {
+		CheckActiveAccounts
+		$Windows = @($Script:ActiveAccountsList | Where-Object {$_.ID -and $_.ProcessID})
+		if ($Windows.Count -eq 0){
+			Write-Host 'Make sure to have launched at least one game window before saving a layout' -ForegroundColor Yellow
+			PressTheAnyKey
+			return
+		}
+		Write-Host 'All current open game windows will be saved under their current positions.'
+		$Existing = @(ReadLayouts)
+		Write-Host
+		do {$Name = (Read-Host 'Layout name').Trim()} until ($Name.Length -gt 0)
+		$LayoutId = GetNextLayoutId -Rows $Existing
+		$Rows = @()
+		foreach ($GameWindow in $Windows){
+			$Account = $Script:AccountOptionsCSV | Where-Object {$_.ID -eq $GameWindow.ID}
+			$Bounds = ReadLayoutWindowBounds -ProcessId $GameWindow.ProcessID
+			Write-Host "`nWindow $($Rows.Count + 1): account $($Account.ID) ($($Account.AccountLabel))`n"
+			$Files = @(GetLayoutSettingsFiles -Account $Account)
+			if ($Files.Count -eq 0){throw "No settings files found for account $($Account.ID). Start the game normally to create Settings.json."}
+			for ($Index = 0; $Index -lt $Files.Count; $Index++){
+				$Label = 'Current Settings'
+				if ($Files[$Index].Name -ine 'Settings.json'){$Label = 'Settings - ' + ($Files[$Index].BaseName -replace '^Settings\.?','')}
+				Write-Host "  $($Index + 1). $($Files[$Index].Name) ($Label)"
+			}
+			Write-Host
+			do {
+				$Choice = Read-Host 'Choose a settings file number'
+				$FileNumber = 0
+				$Valid = [int]::TryParse($Choice, [ref]$FileNumber) -and $FileNumber -ge 1 -and $FileNumber -le $Files.Count
+				if (-not $Valid){Write-Host 'Invalid settings choice.' -ForegroundColor Yellow}
+			} until ($Valid)
+			$Regions = @('Americas','Europe','Asia')
+			$DefaultNumber = 0
+			$HasDefault = [int]::TryParse([string]$Script:Config.DefaultRegion, [ref]$DefaultNumber) -and $DefaultNumber -in 1..3
+			$DefaultText = if ($HasDefault){"; Enter for $($Regions[$DefaultNumber - 1])"}else{''}
+			Write-Host
+			do {
+				$Choice = Read-Host "Region: Americas (1), Europe (2), Asia (3)$DefaultText"
+				if ($Choice -eq '' -and $HasDefault){$Choice = [string]$DefaultNumber}
+				$RegionNumber = 0
+				$Valid = [int]::TryParse($Choice, [ref]$RegionNumber) -and $RegionNumber -in 1..3
+				if (-not $Valid){Write-Host 'Invalid region choice.' -ForegroundColor Yellow}
+			} until ($Valid)
+			$Rows += [pscustomobject][ordered]@{LayoutId=$LayoutId; LayoutName=$Name; WindowIndex=($Rows.Count + 1);
+				AccountId=$Account.ID; WindowXCoordinates=$Bounds.WindowXCoordinates; WindowYCoordinates=$Bounds.WindowYCoordinates;
+				WindowHeight=$Bounds.WindowHeight; WindowWidth=$Bounds.WindowWidth; SettingFile=$Files[$FileNumber - 1].Name;
+				LaunchRegion=$Regions[$RegionNumber - 1]}
+		}
+		# Write only after every window is configured, so errors never save a partial layout.
+		WriteLayouts -Rows @($Existing + $Rows)
+		Write-Host "Saved layout '$Name' ($($Rows.Count) windows)." -ForegroundColor Green
+		Write-Host "Layout ID: $LayoutId" -ForegroundColor Green
+		PressTheAnyKey
+	} catch {
+		Write-Host "Could not save layout: $($_.Exception.Message)" -ForegroundColor Red
+		PressTheAnyKey
+	}
+}
+Function InvokeSavedLayout {
+	param([object[]]$Rows)
+	# Preflight every entry before launching anything. Cache file contents so Settings.json
+	# still means the current settings even after an earlier window switches that file.
+	$Accounts = @(Import-Csv -LiteralPath (Join-Path $Script:WorkingDirectory 'Accounts.csv') -ErrorAction Stop)
+	$Prepared = @()
+	$Servers = @{Americas='us.actual.battle.net'; Europe='eu.actual.battle.net'; Asia='kr.actual.battle.net'}
+	foreach ($Row in $Rows){
+		$Account = @($Accounts | Where-Object {$_.ID -eq $Row.AccountId})
+		if ($Account.Count -ne 1){throw "Account '$($Row.AccountId)' is missing or duplicated in Accounts.csv."}
+		if ($Row.AccountId -in $Prepared.AccountId){throw "Account '$($Row.AccountId)' appears more than once in this layout."}
+		foreach ($Column in @('WindowIndex','WindowXCoordinates','WindowYCoordinates','WindowHeight','WindowWidth')){
+			$Number = 0
+			if (-not [int]::TryParse([string]$Row.$Column, [ref]$Number) -or ($Column -in 'WindowIndex','WindowHeight','WindowWidth' -and $Number -le 0)){
+				throw "Invalid $Column for account '$($Row.AccountId)'."
+			}
+		}
+		if ($Row.WindowIndex -in $Prepared.WindowIndex){throw "Duplicate window index '$($Row.WindowIndex)'."}
+		if (-not $Servers.ContainsKey($Row.LaunchRegion)){throw "Invalid region '$($Row.LaunchRegion)'."}
+		$File = @(GetLayoutSettingsFiles -Account $Account[0] | Where-Object {$_.Name -ieq $Row.SettingFile})
+		if ($File.Count -ne 1){throw "Settings file '$($Row.SettingFile)' is missing for account '$($Row.AccountId)'."}
+		$Content = [System.IO.File]::ReadAllBytes($File[0].FullName)
+		$null = Get-Content -LiteralPath $File[0].FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+		$Prepared += [pscustomobject]@{AccountId=$Row.AccountId; WindowIndex=[int]$Row.WindowIndex; Row=$Row;
+			Account=$Account[0]; SettingsContent=$Content; SettingsPath=(Join-Path (GetLayoutSettingsPath -Account $Account[0]) 'Settings.json')}
+	}
+	$Prepared = @($Prepared | Sort-Object WindowIndex)
+	CheckActiveAccounts
+	if (@($Prepared | Where-Object {$_.AccountId -in $Script:ActiveAccountsList.ID}).Count -gt 0){
+		throw 'One or more accounts in this layout are already open. Close those windows before loading the layout.'
+	}
+	$State = @{}
+	$Variables = 'AccountID','AccountChoice','AccountOptionsCSV','Region','RegionOption','RegionLabel','LastRegion','LastAccount','OpenBatches','OpenAllAccounts','PW','PWmanualset','Token','LayoutEntry','LayoutSettingsContent','LayoutSettingsPath','LayoutLaunchSucceeded'
+	foreach ($Variable in $Variables){$State[$Variable] = Get-Variable -Name $Variable -Scope Script -ValueOnly -ErrorAction SilentlyContinue}
+	try {
+		$Script:AccountOptionsCSV = $Accounts
+		$Script:OpenBatches = $True
+		$Script:OpenAllAccounts = $False
+		foreach ($Entry in $Prepared){
+			$Script:AccountID = $Entry.AccountId
+			$Script:AccountChoice = $Entry.Account
+			$Script:Region = $Servers[$Entry.Row.LaunchRegion]
+			$Script:RegionOption = 'layout'
+			$Script:RegionLabel = @{Americas='NA'; Europe='EU'; Asia='KR'}[$Entry.Row.LaunchRegion]
+			$Script:LastRegion = $Script:Region
+			$Script:LastAccount = $Entry -eq $Prepared[-1]
+			$Script:PW = $Null
+			$Script:PWmanualset = $False
+			$Script:LayoutEntry = $Entry.Row
+			$Script:LayoutSettingsContent = $Entry.SettingsContent
+			$Script:LayoutSettingsPath = $Entry.SettingsPath
+			$Script:LayoutLaunchSucceeded = $False
+			Write-Host "Opening account $($Entry.AccountId) in $($Entry.Row.LaunchRegion)..."
+			Processing
+			if (-not $Script:LayoutLaunchSucceeded){throw "Launch did not complete for account '$($Entry.AccountId)'. Remaining windows were not launched."}
+		}
+		Write-Host 'Layout loaded.' -ForegroundColor Green
+	} finally {
+		foreach ($Variable in $Variables){Set-Variable -Name $Variable -Scope Script -Value $State[$Variable]}
+	}
+}
+Function LaunchLayoutParameter {
+	param([string]$LayoutId)
+	$Id = 0
+	if ($LayoutId -notmatch '^[1-9][0-9]*$' -or -not [int]::TryParse($LayoutId, [ref]$Id)){
+		throw 'Use a positive numeric layout ID with -layout.'
+	}
+	if ($Script:Config.LayoutModeEnabled -ne 'True'){
+		throw 'Enable LayoutModeEnabled in config.xml before using -layout.'
+	}
+	$Rows = @(ReadLayouts | Where-Object {$_.LayoutId -eq $LayoutId})
+	if ($Rows.Count -eq 0){throw "Layout '$LayoutId' was not found in layouts.csv."}
+	InvokeSavedLayout -Rows $Rows
+}
+Function LoadLayout {
+	try {
+		$Rows = @(ReadLayouts)
+		if ($Rows.Count -eq 0){Write-Host 'No saved layouts found.' -ForegroundColor Yellow; PressTheAnyKey; return}
+		$Layouts = @($Rows | Group-Object LayoutId | Sort-Object {[int]$_.Name})
+		foreach ($SavedLayout in $Layouts){
+			Write-Host "  $($SavedLayout.Name). $($SavedLayout.Group[0].LayoutName) ($($SavedLayout.Count) windows)"
+		}
+		do {
+			$Choice = Read-Host 'Choose a layout ID (c to cancel)'
+			if ($Choice -ieq 'c'){return}
+			$SelectedLayout = $Layouts | Where-Object {$_.Name -eq $Choice}
+			if ($Null -eq $SelectedLayout){Write-Host 'Invalid layout choice.' -ForegroundColor Yellow}
+		} until ($Null -ne $SelectedLayout)
+		InvokeSavedLayout -Rows $SelectedLayout.Group
+	} catch {
+		Write-Host "Could not load layout: $($_.Exception.Message)" -ForegroundColor Red
+		PressTheAnyKey
+	}
+}
+Function LayoutMenu {
+	if ($Script:Config.LayoutModeEnabled -ne 'True'){return}
+	Write-Host "  Layouts: '$X[38;2;255;165;000;22ml$X[0m' to load, '$X[38;2;255;165;000;22ms$X[0m' to save, '$X[38;2;255;165;000;22mc$X[0m' to cancel: " -NoNewline
+	do {
+		$Choice = ReadKeyTimeout '' $MenuRefreshRate 'c' -AdditionalAllowedKeys 27
+		if ($Choice -notin 'l','s','c','Esc'){Write-Host "Choose '$X[38;2;255;165;000;22ml$X[0m' to load, '$X[38;2;255;165;000;22ms$X[0m' to save, or '$X[38;2;255;165;000;22mc$X[0m' to cancel." -ForegroundColor Yellow}
+	} until ($Choice -in 'l','s','c','Esc')
+	if ($Choice -eq 'l'){LoadLayout}
+	if ($Choice -eq 's'){SaveLayout}
+}
 Function SaveWindowLocations { # Get Window Location coordinates and save to Accounts.csv
 	LoadWindowClass
 	FormatFunction -indents 2 -text "Saving locations of each open account so that they the windows launch in the same place next time. Assumes you've configured the game to launch in windowed mode."
@@ -1947,7 +2196,8 @@ Function SetWindowLocations { # Move windows to preferred location/layout
 		[int]$X,
 		[int]$Y,
 		[int]$Width,
-		[int]$Height
+		[int]$Height,
+		[switch]$Verify
 	)
 	LoadWindowClass
 	$handle = (Get-Process -Id $Id).MainWindowHandle
@@ -1961,7 +2211,9 @@ Function SetWindowLocations { # Move windows to preferred location/layout
 	[Window]::ShowWindow($handle, 9)
 	Start-Sleep -Milliseconds 10
 	# Move the window and set its position
-	[Window]::SetWindowPos($handle, $HWND_TOPMOST, $X, $Y, $Width, $Height, $SWP_SHOWWINDOW -bor $SWP_NOREDRAW)
+	$Positioned = [Window]::SetWindowPos($handle, $HWND_TOPMOST, $X, $Y, $Width, $Height, $SWP_SHOWWINDOW -bor $SWP_NOREDRAW)
+	if ($Verify -and -not $Positioned){throw "Could not position game window $Id. Layout loading stopped."}
+	$Positioned
 	Start-Sleep -Milliseconds 10
 	# Optionally, bring it to the foreground
 	[Window]::SetForegroundWindow($handle)
@@ -4352,7 +4604,11 @@ Function Menu {
 Function ChooseAccount {
 	if ($Null -eq $Script:AccountUsername){#if no account parameters have been set already
 		do {
-			$LoopMenuOptions = "r,t,d,g,j,s,i,o,c" -split ","
+			$LoopMenuOptions = "r,t,d,g,j,s,i,o,c,l" -split ","
+			if ($Script:AccountID -eq "l"){
+				LayoutMenu
+				$Script:AccountID = "r"
+			}
 			if ($Script:AccountID -eq "t"){
 				TerrorZone
 				$Script:AccountID = "r"
@@ -4869,6 +5125,11 @@ Function ChooseAccount {
 					Write-Host "'$X[38;2;255;165;000;22mj$X[0m' for jokes,"
 					$TerrorZoneOption = ""
 				}
+				$LayoutOption = $Null
+				if ($Script:Config.LayoutModeEnabled -eq 'True'){
+					$LayoutOption = 'l'
+					Write-Host "  '$X[38;2;255;165;000;22ml$X[0m' for layouts,"
+				}
 				if ($Script:Config.ManualSettingSwitcherEnabled -eq $true){
 					$ManualSettingSwitcherOption = "s"
 					Write-Host "  '$X[38;2;255;165;000;22mo$X[0m' for config options, '$X[38;2;255;165;000;22ms$X[0m' to toggle the Manual Setting Switcher, "
@@ -4890,7 +5151,7 @@ Function ChooseAccount {
 				else {
 					$Script:AccountID = ReadKeyTimeout "" $MenuRefreshRate "r" #$MenuRefreshRate represents the refresh rate of the menu in seconds (30). if no button is pressed, send "r" for refresh.
 				}
-				if ($Script:AccountID -notin ($Script:AcceptableValues + "x" + "r" + "g" + "j" + "i" + "o" + $TerrorZoneOption + $DCloneOption + $ManualSettingSwitcherOption + $AllOption + $BatchOption + $CloseOption) -and $Null -ne $Script:AccountID){
+				if ($Script:AccountID -notin ($Script:AcceptableValues + "x" + "r" + "g" + "j" + "i" + "o" + $TerrorZoneOption + $DCloneOption + $ManualSettingSwitcherOption + $AllOption + $BatchOption + $CloseOption + $LayoutOption) -and $Null -ne $Script:AccountID){
 					if ($Script:AccountID -eq "a" -and $Script:Config.DisableOpenAllAccountsOption -ne $true){
 						Write-Host " Can't open all accounts as all of your accounts are already open doofus!" -foregroundcolor red
 					}
@@ -5089,7 +5350,15 @@ Function Processing {
 		$Script:PW = $Null
 		$Script:Token = $Null
 		#Switch Settings file to load D2r from.
-		if ($Config.SettingSwitcherEnabled -eq $True -or $Script:AskForSettings -eq $True){
+		if ($Null -ne $Script:LayoutEntry){
+			try {
+				[System.IO.File]::WriteAllBytes($Script:LayoutSettingsPath, $Script:LayoutSettingsContent)
+			} catch {
+				Write-Host "Couldn't apply layout settings: $($_.Exception.Message)" -ForegroundColor Red
+				return
+			}
+		}
+		if ($Null -eq $Script:LayoutEntry -and ($Config.SettingSwitcherEnabled -eq $True -or $Script:AskForSettings -eq $True)){
 			if ($Script:AccountChoice.CustomLaunchArguments -match "-mod"){
 				$pattern = "-mod\s+(\S+)" #pattern to find the first word after -mod
 				if ($Script:AccountChoice.CustomLaunchArguments -match $pattern){
@@ -5134,7 +5403,7 @@ Function Processing {
 				}
 			}
 		}
-		if ($Config.SettingSwitcherEnabled -eq $True -and $Script:AskForSettings -ne $True -and $Script:ParamLaunchAndAccountNotInAccountsCSV -ne $True){#if user has enabled the auto settings switcher.
+		if ($Null -eq $Script:LayoutEntry -and $Config.SettingSwitcherEnabled -eq $True -and $Script:AskForSettings -ne $True -and $Script:ParamLaunchAndAccountNotInAccountsCSV -ne $True){#if user has enabled the auto settings switcher.
 			$SettingsJSON = ($SettingsProfilePath + "Settings.json")
 			if ((Test-Path -Path ($SettingsProfilePath + "Settings.json")) -eq $true){ #check if settings.json does exist in the savegame path (if it doesn't, this indicates first time launch or use of a new single player mod).
 				ForEach ($id in $Script:AccountOptionsCSV){#create a copy of settings.json file per account so user doesn't have to do it themselves
@@ -5167,7 +5436,7 @@ Function Processing {
 				}
 			}
 		}
-		if ($Script:AskForSettings -eq $True){#steps go through if user has toggled on the manual setting switcher ('s' in the menu).
+		if ($Null -eq $Script:LayoutEntry -and $Script:AskForSettings -eq $True){#steps go through if user has toggled on the manual setting switcher ('s' in the menu).
 			$SettingsJSON = ($SettingsProfilePath + "Settings.json")
 			$files = Get-ChildItem -Path $SettingsProfilePath -Filter "settings.*.json"
 			$Counter = 1
@@ -5339,7 +5608,7 @@ Function Processing {
 				Write-Host " Couldn't rename window :(" -foregroundcolor red
 				PressTheAnyKey
 			}
-			If ($Script:Config.RememberWindowLocations -eq $True -and $Script:ParamLaunchAndAccountNotInAccountsCSV -ne $True){ #If user has enabled the feature to automatically move game Windows to preferred screen locations.
+			If ($Null -eq $Script:LayoutEntry -and $Script:Config.RememberWindowLocations -eq $True -and $Script:ParamLaunchAndAccountNotInAccountsCSV -ne $True){ #If user has enabled the feature to automatically move game Windows to preferred screen locations.
 				if ($Script:AccountChoice.WindowXCoordinates -ne "" -and $Script:AccountChoice.WindowYCoordinates -ne "" -and $Null -ne $Script:AccountChoice.WindowXCoordinates -and $Null -ne $Script:AccountChoice.WindowYCoordinates -and $Script:AccountChoice.WindowWidth -ne "" -and $Script:AccountChoice.WindowHeight -ne "" -and $Null -ne $Script:AccountChoice.WindowWidth -and $Null -ne $Script:AccountChoice.WindowHeight){ #Check if the account has had coordinates saved yet.
 					$GetLoadWindowClassFunc = $(Get-Command LoadWindowClass).Definition
 					$GetSetWindowLocationsFunc = $(Get-Command SetWindowLocations).Definition
@@ -5369,6 +5638,10 @@ Function Processing {
 				Write-Host " $X[38;2;255;255;0;4mDO NOT OPEN OR CLOSE ANOTHER GAME INSTANCE UNTIL YOU'VE DONE THIS.$X[0m"
 				do {
 					$NewTokenRegValue = (Get-ItemProperty -Path $Path -Name WEB_TOKEN).WEB_TOKEN
+					if ($Null -ne $Script:LayoutEntry -and -not (Get-Process -Id $process.ProcessID -ErrorAction SilentlyContinue)){
+						Write-Host 'Game closed before login completed. Layout loading stopped.' -ForegroundColor Red
+						return
+					}
 					$CompareCheck = Compare-Object $CurrentTokenRegValue $NewTokenRegValue
 					if ($Null -ne $CompareCheck){#if CompareCheck has some value, this means it found differences, IE the reg value changed.
 						$CurrentTokenRegValue = (Get-ItemProperty -Path $Path -Name WEB_TOKEN).WEB_TOKEN
@@ -5380,6 +5653,11 @@ Function Processing {
 						Start-Sleep -milliseconds 451
 					}
 				} until ($WebTokenChangeCounter -eq 1)
+			}
+			if ($Null -ne $Script:LayoutEntry){
+				Start-Sleep -Milliseconds 2026
+				SetWindowLocations -Id $process.ProcessID -X $Script:LayoutEntry.WindowXCoordinates -Y $Script:LayoutEntry.WindowYCoordinates -Width $Script:LayoutEntry.WindowWidth -Height $Script:LayoutEntry.WindowHeight -Verify | Out-Null
+				$Script:LayoutLaunchSucceeded = $True
 			}
 			if ($Script:LastAccount -eq $True -or ($Script:OpenAllAccounts -ne $True -and $Script:OpenBatches -ne $True)){
 				if ($Script:MovedWindowLocations -ge 1){
@@ -5414,6 +5692,15 @@ Clear-Host #Clear screen of all the initialisation crap.
 D2rLevels #Level ID's used for comparing TZ data against.
 QuoteList #List of D2 quotes to display.
 SetQualityRolls #Randomly roll quotes in D2 themed colours.
+if ($Null -ne $Layout){
+	try {
+		LaunchLayoutParameter -LayoutId $Layout
+	} catch {
+		Write-Host "Could not launch layout: $($_.Exception.Message)" -ForegroundColor Red
+		exit 1
+	}
+	exit 0
+}
 Menu #start script.
 
 #For Diablo II: Resurrected
